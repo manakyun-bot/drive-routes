@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DriveRoutes">
+<meta name="theme-color" content="#0e141b">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>My Drive Routes</title>
+<style>
+:root{--bg:#0e141b;--panel:#17202b;--line:#2a3644;--text:#e8eef5;--muted:#8b9bb0;--blue:#4aa3ff;--green:#5ad19a;--amber:#ffb454;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;-webkit-text-size-adjust:100%}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:calc(env(safe-area-inset-top,0px) + 10px) 16px 10px;border-bottom:1px solid var(--line)}
+.top{display:flex;align-items:center;gap:8px}
+h1{flex:1;margin:0;font-size:22px;letter-spacing:.01em}
+.ic{width:42px;height:42px;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:12px;font-size:19px}
+.ic:active{background:var(--line)}
+#q{width:100%;margin-top:10px;padding:11px 14px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:16px}
+main{padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 28px);max-width:640px;margin:0 auto}
+#status{min-height:22px;margin:0 0 8px;color:var(--muted);font-size:14px}
+#status.err{color:var(--amber)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;overflow:hidden;margin-bottom:16px}
+.map{background:#101a24;border-bottom:1px solid var(--line)}
+.map svg{display:block;width:100%;height:auto}
+.body{padding:12px 14px 14px}
+h2{margin:0 0 6px;font-size:15px;font-weight:600;line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.meta{margin:0 0 12px;color:var(--muted);font-size:13px;display:flex;gap:14px}
+.act{display:flex;gap:8px;align-items:center}
+.go{flex:1;text-align:center;background:var(--blue);color:#06121f;font-weight:700;text-decoration:none;padding:12px;border-radius:12px}
+.go:active{filter:brightness(.85)}
+.alt,.del{color:var(--muted);font-size:13px;text-decoration:none;border:1px solid var(--line);background:transparent;border-radius:10px;padding:10px 11px}
+.empty{text-align:center;color:var(--muted);padding:48px 12px}
+.sheet{position:fixed;inset:0;z-index:10;background:rgba(0,0,0,.6);display:flex;align-items:flex-end}
+.sheet[hidden]{display:none}
+.panel{width:100%;max-width:640px;margin:0 auto;background:var(--panel);border-radius:18px 18px 0 0;padding:18px 16px calc(env(safe-area-inset-bottom,0px) + 18px)}
+.panel h3{margin:0 0 12px;font-size:17px}
+.panel label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+.panel input{width:100%;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:16px}
+.row{display:flex;gap:8px;margin-top:16px}
+.row button{flex:1;padding:12px;border-radius:12px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:15px}
+.row .pri{background:var(--blue);border-color:var(--blue);color:#06121f;font-weight:700}
+</style>
+</head>
+<body>
+<header>
+  <div class="top"><h1>My Drive Routes</h1><button class="ic" id="reload" aria-label="更新">↻</button><button class="ic" id="cfg" aria-label="設定">⚙</button></div>
+  <input id="q" type="search" placeholder="ルートを検索" autocomplete="off">
+</header>
+<main><p id="status"></p><div id="list"></div></main>
+<div class="sheet" id="sheet" hidden><div class="panel">
+  <h3>設定</h3>
+  <label for="url">GASのURL</label><input id="url" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+  <label for="tok">合言葉</label><input id="tok" type="password" autocomplete="off" autocapitalize="off">
+  <div class="row"><button id="unhide">非表示を戻す</button></div>
+  <div class="row"><button id="close">閉じる</button><button class="pri" id="save">保存して読み込む</button></div>
+</div></div>
+<script>
+const $=s=>document.querySelector(s);
+const LS={get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+let routes=LS.get('dr_routes',[]),hidden=LS.get('dr_hidden',[]),query='';
+const NS='http://www.w3.org/2000/svg';
+function status(t,err){const s=$('#status');s.textContent=t;s.className=err?'err':''}
+function thumb(p){
+  const W=320,H=160,pad=24,mid=p.reduce((s,a)=>s+a.lat,0)/p.length,k=Math.cos(mid*Math.PI/180);
+  const xs=p.map(a=>a.lng*k),ys=p.map(a=>-a.lat);
+  const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
+  const s=Math.min((W-2*pad)/((x1-x0)||1e-6),(H-2*pad)/((y1-y0)||1e-6));
+  const ox=(W-(x1-x0)*s)/2,oy=(H-(y1-y0)*s)/2;
+  const pt=p.map((a,i)=>[ox+(xs[i]-x0)*s,oy+(ys[i]-y0)*s]);
+  let g='';
+  for(let x=0;x<=W;x+=40)g+=`<path d="M${x} 0V${H}" stroke="#1b2735"/>`;
+  for(let y=0;y<=H;y+=40)g+=`<path d="M0 ${y}H${W}" stroke="#1b2735"/>`;
+  g+=`<polyline points="${pt.map(a=>a[0].toFixed(1)+','+a[1].toFixed(1)).join(' ')}" fill="none" stroke="#4aa3ff" stroke-width="2.5" stroke-dasharray="2 6" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const dot=(a,c,r,t)=>`<circle cx="${a[0].toFixed(1)}" cy="${a[1].toFixed(1)}" r="${r}" fill="${c}" stroke="#0e141b" stroke-width="2"/>`+(t?`<text x="${a[0].toFixed(1)}" y="${(a[1]+3.5).toFixed(1)}" font-size="10" font-weight="700" text-anchor="middle" fill="#06121f">${t}</text>`:'');
+  for(let i=1;i<pt.length-1;i++)g+=dot(pt[i],'#4aa3ff',9,i);
+  g+=dot(pt[pt.length-1],'#ffb454',10,'');
+  g+=dot(pt[0],'#5ad19a',10,'');
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="ルートの略図">${g}</svg>`;
+}
+function render(){
+  const q=query.trim().toLowerCase(),list=$('#list');list.textContent='';
+  const vis=routes.filter(r=>!hidden.includes(r.id)&&(!q||(r.title+' '+r.points.map(p=>p.name).join(' ')).toLowerCase().includes(q)));
+  if(!vis.length){const d=document.createElement('div');d.className='empty';d.textContent=routes.length?'該当するルートがありません':'ルートがありません。右上の更新を押してください';list.append(d);return}
+  vis.forEach(r=>{
+    const c=document.createElement('article');c.className='card';
+    c.innerHTML=`<div class="map">${thumb(r.points)}</div><div class="body"><h2></h2><p class="meta"><span class="d"></span><span class="n"></span></p><div class="act"><a class="go" rel="noopener">ナビを開始</a><a class="alt" rel="noopener">元のリンク</a><button class="del" data-id="">非表示</button></div></div>`;
+    c.querySelector('h2').textContent=r.title;
+    c.querySelector('.d').textContent=r.date;
+    c.querySelector('.n').textContent='経由 '+Math.max(r.points.length-2,0)+' か所';
+    c.querySelector('.go').href=r.navUrl;
+    c.querySelector('.alt').href=r.url;
+    c.querySelector('.del').dataset.id=r.id;
+    list.append(c);
+  });
+}
+async function load(){
+  const cfg=LS.get('dr_cfg',null);
+  if(!cfg||!cfg.url||!cfg.token){openSheet();return}
+  status('読み込み中…');
+  try{
+    const u=cfg.url.trim()+(cfg.url.includes('?')?'&':'?')+'token='+encodeURIComponent(cfg.token.trim());
+    const r=await fetch(u,{cache:'no-store'});
+    const j=await r.json();
+    if(!j.ok)throw new Error(j.error==='unauthorized'?'合言葉が違います。設定を確認してください。':'サーバーでエラーが起きました。');
+    routes=j.routes;LS.set('dr_routes',routes);status('');
+  }catch(e){
+    status(e.message&&e.message.length<40&&!/fetch|JSON|load/i.test(e.message)?e.message:'読み込めませんでした。URLと通信状態を確認してください。',true);
+  }
+  render();
+}
+function openSheet(){const c=LS.get('dr_cfg',{});$('#url').value=c.url||'';$('#tok').value=c.token||'';$('#sheet').hidden=false}
+$('#reload').onclick=load;
+$('#cfg').onclick=openSheet;
+$('#close').onclick=()=>{$('#sheet').hidden=true};
+$('#save').onclick=()=>{LS.set('dr_cfg',{url:$('#url').value,token:$('#tok').value});$('#sheet').hidden=true;load()};
+$('#unhide').onclick=()=>{hidden=[];LS.set('dr_hidden',hidden);render();$('#sheet').hidden=true};
+$('#q').oninput=e=>{query=e.target.value;render()};
+$('#list').onclick=e=>{
+  const b=e.target.closest('.del');if(!b)return;
+  if(confirm('この一覧から隠します。Gmailのメールは消えません。')){hidden.push(b.dataset.id);LS.set('dr_hidden',hidden);render()}
+};
+render();load();
+</script>
+</body>
+</html>
