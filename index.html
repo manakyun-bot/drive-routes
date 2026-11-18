@@ -88,12 +88,12 @@ function render(){
   if(!vis.length){const d=document.createElement('div');d.className='empty';d.textContent=routes.length?'該当するルートがありません':'ルートがありません。右上の更新を押してください';list.append(d);return}
   vis.forEach(r=>{
     const c=document.createElement('article');c.className='card';
-    c.innerHTML=`<div class="map">${thumb(r.points)}</div><div class="body"><h2></h2><p class="meta"><span class="d"></span><span class="n"></span></p><div class="act"><a class="go" rel="noopener">ナビを開始</a><a class="alt" rel="noopener">元のリンク</a><button class="del" data-id="">非表示</button></div></div>`;
+    c.innerHTML=`<div class="map">${thumb(r.points)}</div><div class="body"><h2></h2><p class="meta"><span class="d"></span><span class="n"></span></p><div class="act"><a class="go" rel="noopener">ナビを開始</a><a class="alt" rel="noopener">座標で開く</a><button class="del" data-id="">非表示</button></div></div>`;
     c.querySelector('h2').textContent=r.title;
     c.querySelector('.d').textContent=r.date;
     c.querySelector('.n').textContent='経由 '+Math.max(r.points.length-2,0)+' か所';
-    c.querySelector('.go').href=r.navUrl;
-    c.querySelector('.alt').href=r.url;
+    c.querySelector('.go').href=r.url;
+    c.querySelector('.alt').href=r.navUrl;
     c.querySelector('.del').dataset.id=r.id;
     list.append(c);
   });
