@@ -65,23 +65,67 @@ const LS={get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}
 let routes=LS.get('dr_routes',[]),hidden=LS.get('dr_hidden',[]),query='';
 const NS='http://www.w3.org/2000/svg';
 function status(t,err){const s=$('#status');s.textContent=t;s.className=err?'err':''}
+
+/* ===== 地図の背景（国土地理院タイル） =====
+   TILE : 使う地図の種類。pale=淡色地図 / std=標準地図
+   TU   : 1枚のタイルを画面上で何単位の大きさに描くか（既定256）。
+          小さくするとタイルが細かくなり、地図の文字は小さく、見える範囲は広くなる。
+*/
+const TILE='https://cyberjapandata.gsi.go.jp/xyz/pale/';
+const TU=256;
+const mx=(lng,z)=>(lng+180)/360*TU*Math.pow(2,z);
+const my=(lat,z)=>{const s=Math.sin(lat*Math.PI/180);return(0.5-Math.log((1+s)/(1-s))/(4*Math.PI))*TU*Math.pow(2,z)};
+
 function thumb(p){
-  const W=320,H=160,pad=24,mid=p.reduce((s,a)=>s+a.lat,0)/p.length,k=Math.cos(mid*Math.PI/180);
-  const xs=p.map(a=>a.lng*k),ys=p.map(a=>-a.lat);
-  const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
-  const s=Math.min((W-2*pad)/((x1-x0)||1e-6),(H-2*pad)/((y1-y0)||1e-6));
-  const ox=(W-(x1-x0)*s)/2,oy=(H-(y1-y0)*s)/2;
-  const pt=p.map((a,i)=>[ox+(xs[i]-x0)*s,oy+(ys[i]-y0)*s]);
+  const W=320,H=160,pad=24;
+  // ルート全体が枠に収まる、いちばん大きいズームを選ぶ
+  let z=3;
+  for(let t=16;t>=3;t--){
+    const xs=p.map(a=>mx(a.lng,t)),ys=p.map(a=>my(a.lat,t));
+    if(Math.max(...xs)-Math.min(...xs)<=W-2*pad&&Math.max(...ys)-Math.min(...ys)<=H-2*pad){z=t;break}
+  }
+  const xs=p.map(a=>mx(a.lng,z)),ys=p.map(a=>my(a.lat,z));
+  const cx=(Math.min(...xs)+Math.max(...xs))/2,cy=(Math.min(...ys)+Math.max(...ys))/2;
+  const ox=cx-W/2,oy=cy-H/2;
+  const pt=p.map((a,i)=>[xs[i]-ox,ys[i]-oy]);
+  const n=Math.pow(2,z);
   let g='';
-  for(let x=0;x<=W;x+=40)g+=`<path d="M${x} 0V${H}" stroke="#1b2735"/>`;
-  for(let y=0;y<=H;y+=40)g+=`<path d="M0 ${y}H${W}" stroke="#1b2735"/>`;
-  g+=`<polyline points="${pt.map(a=>a[0].toFixed(1)+','+a[1].toFixed(1)).join(' ')}" fill="none" stroke="#4aa3ff" stroke-width="2.5" stroke-dasharray="2 6" stroke-linecap="round" stroke-linejoin="round"/>`;
-  const dot=(a,c,r,t)=>`<circle cx="${a[0].toFixed(1)}" cy="${a[1].toFixed(1)}" r="${r}" fill="${c}" stroke="#0e141b" stroke-width="2"/>`+(t?`<text x="${a[0].toFixed(1)}" y="${(a[1]+3.5).toFixed(1)}" font-size="10" font-weight="700" text-anchor="middle" fill="#06121f">${t}</text>`:'');
-  for(let i=1;i<pt.length-1;i++)g+=dot(pt[i],'#4aa3ff',9,i);
+  // タイル（画面に入ったときに読み込む。ここでは data-src に入れておく）
+  for(let ty=Math.floor(oy/TU);ty<=Math.floor((oy+H)/TU);ty++){
+    if(ty<0||ty>=n)continue;
+    for(let tx=Math.floor(ox/TU);tx<=Math.floor((ox+W)/TU);tx++){
+      if(tx<0||tx>=n)continue;
+      g+=`<image data-src="${TILE}${z}/${tx}/${ty}.png" x="${(tx*TU-ox).toFixed(1)}" y="${(ty*TU-oy).toFixed(1)}" width="${TU+0.6}" height="${TU+0.6}"/>`;
+    }
+  }
+  // ルート線（白い縁取り＋青い点線）
+  const pts=pt.map(a=>a[0].toFixed(1)+','+a[1].toFixed(1)).join(' ');
+  g+=`<polyline points="${pts}" fill="none" stroke="#ffffff" stroke-opacity=".9" stroke-width="6" stroke-dasharray="2 6" stroke-linecap="round" stroke-linejoin="round"/>`;
+  g+=`<polyline points="${pts}" fill="none" stroke="#2f7fe0" stroke-width="3" stroke-dasharray="2 6" stroke-linecap="round" stroke-linejoin="round"/>`;
+  const dot=(a,c,r,t)=>`<circle cx="${a[0].toFixed(1)}" cy="${a[1].toFixed(1)}" r="${r}" fill="${c}" stroke="#0e141b" stroke-width="2"/>`+(t?`<text x="${a[0].toFixed(1)}" y="${(a[1]+3.2).toFixed(1)}" font-size="9" font-weight="700" text-anchor="middle" fill="#06121f">${t}</text>`:'');
+  for(let i=1;i<pt.length-1;i++)g+=dot(pt[i],'#4aa3ff',8,i);
   g+=dot(pt[pt.length-1],'#ffb454',10,'');
   g+=dot(pt[0],'#5ad19a',10,'');
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="ルートの略図">${g}</svg>`;
+  // 出典（地図が見えている間は常に表示）
+  g+=`<rect x="${W-64}" y="${H-15}" width="64" height="15" fill="#ffffff" fill-opacity=".8"/><text x="${W-4}" y="${H-4}" font-size="9" text-anchor="end" fill="#333">地理院タイル</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="ルートの地図">${g}</svg>`;
 }
+
+// カードが画面に近づいたら、地図のタイルを読み込む
+function loadTiles(el){
+  el.querySelectorAll('image[data-src]').forEach(i=>{
+    i.setAttribute('href',i.getAttribute('data-src'));
+    i.removeAttribute('data-src');
+  });
+}
+const io=('IntersectionObserver' in window)?new IntersectionObserver(es=>{
+  es.forEach(e=>{
+    if(!e.isIntersecting)return;
+    loadTiles(e.target);
+    io.unobserve(e.target);
+  });
+},{rootMargin:'300px'}):null;
+
 function render(){
   const q=query.trim().toLowerCase(),list=$('#list');list.textContent='';
   const vis=routes.filter(r=>!hidden.includes(r.id)&&(!q||(r.title+' '+r.points.map(p=>p.name).join(' ')).toLowerCase().includes(q)));
@@ -96,6 +140,8 @@ function render(){
     c.querySelector('.alt').href=r.navUrl;
     c.querySelector('.del').dataset.id=r.id;
     list.append(c);
+    const m=c.querySelector('.map');
+    if(io)io.observe(m);else loadTiles(m);
   });
 }
 async function load(){
