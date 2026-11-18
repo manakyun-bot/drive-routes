@@ -39,12 +39,13 @@ main{padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 28px);max-width:64
 .map svg{display:block;width:100%;height:auto}
 .map svg.ov{position:absolute;left:0;top:0;width:100%;height:100%}
 .pin{stroke:var(--bg)}
-/* ダークのときは、地図の画像だけを暗い色に変える（ここの数字で濃さを調整できる） */
+/* ダークのとき、白地図は暗い色に、写真は少し暗くする。淡色は変えない（ここの数字で調整できる） */
 html[data-theme="dark"] .map svg.tiles{filter:invert(1) hue-rotate(180deg) brightness(.82) contrast(.92)}
 html[data-theme="dark"][data-map="photo"] .map svg.tiles{filter:brightness(.7)}
+html[data-theme="dark"][data-map="pale"] .map svg.tiles{filter:none}
 .att-d{display:none}
-html[data-theme="dark"] .att-d{display:inline}
-html[data-theme="dark"] .att-l{display:none}
+html[data-theme="dark"]:not([data-map="pale"]) .att-d{display:inline}
+html[data-theme="dark"]:not([data-map="pale"]) .att-l{display:none}
 .body{padding:12px 14px 14px}
 h2{margin:0 0 6px;font-size:15px;font-weight:600;line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .meta{margin:0 0 12px;color:var(--muted);font-size:13px;display:flex;gap:14px}
@@ -86,7 +87,7 @@ h2{margin:0 0 6px;font-size:15px;font-weight:600;line-height:1.45;display:-webki
   <label for="tok">合言葉</label><input id="tok" type="password" autocomplete="off" autocapitalize="off">
   <div class="row"><button id="unhide">非表示を戻す</button></div>
   <div class="row"><button id="close">閉じる</button><button class="pri" id="save">保存して読み込む</button></div>
-  <p class="ver">画面のバージョン：2026-11-18b 実線・赤いゴール・地図の種類</p>
+  <p class="ver">画面のバージョン：2026-11-18c 淡色はダークでも明るいまま</p>
 </div></div>
 <script>
 const $=s=>document.querySelector(s);
