@@ -52,7 +52,7 @@ h2{margin:0 0 6px;font-size:15px;font-weight:600;line-height:1.45;display:-webki
 .act{display:flex;gap:8px;align-items:center}
 .go{flex:1;text-align:center;background:var(--blue);color:var(--onblue);font-weight:700;text-decoration:none;padding:12px;border-radius:12px}
 .go:active{filter:brightness(.85)}
-.alt,.del{color:var(--muted);font-size:13px;text-decoration:none;border:1px solid var(--line);background:transparent;border-radius:10px;padding:10px 11px}
+.del{color:var(--muted);font-size:13px;text-decoration:none;border:1px solid var(--line);background:transparent;border-radius:10px;padding:10px 11px}
 .empty{text-align:center;color:var(--muted);padding:48px 12px}
 .sheet{position:fixed;inset:0;z-index:10;background:rgba(0,0,0,.6);display:flex;align-items:flex-end}
 .sheet[hidden]{display:none}
@@ -87,7 +87,7 @@ h2{margin:0 0 6px;font-size:15px;font-weight:600;line-height:1.45;display:-webki
   <label for="tok">合言葉</label><input id="tok" type="password" autocomplete="off" autocapitalize="off">
   <div class="row"><button id="unhide">非表示を戻す</button></div>
   <div class="row"><button id="close">閉じる</button><button class="pri" id="save">保存して読み込む</button></div>
-  <p class="ver">画面のバージョン：2026-11-18c 淡色はダークでも明るいまま</p>
+  <p class="ver">画面のバージョン：2026-11-20a 座標で開くボタンを削除</p>
 </div></div>
 <script>
 const $=s=>document.querySelector(s);
@@ -197,12 +197,11 @@ function render(){
   if(!vis.length){const d=document.createElement('div');d.className='empty';d.textContent=routes.length?'該当するルートがありません':'ルートがありません。右上の更新を押してください';list.append(d);return}
   vis.forEach(r=>{
     const c=document.createElement('article');c.className='card';
-    c.innerHTML=`<div class="map">${thumb(r.points)}</div><div class="body"><h2></h2><p class="meta"><span class="d"></span><span class="n"></span></p><div class="act"><a class="go" rel="noopener">ナビを開始</a><a class="alt" rel="noopener">座標で開く</a><button class="del" data-id="">非表示</button></div></div>`;
+    c.innerHTML=`<div class="map">${thumb(r.points)}</div><div class="body"><h2></h2><p class="meta"><span class="d"></span><span class="n"></span></p><div class="act"><a class="go" rel="noopener">ナビを開始</a><button class="del" data-id="">非表示</button></div></div>`;
     c.querySelector('h2').textContent=r.title;
     c.querySelector('.d').textContent=r.date;
     c.querySelector('.n').textContent='経由 '+Math.max(r.points.length-2,0)+' か所';
     c.querySelector('.go').href=r.url;
-    c.querySelector('.alt').href=r.navUrl;
     c.querySelector('.del').dataset.id=r.id;
     list.append(c);
     const m=c.querySelector('.map');
