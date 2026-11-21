@@ -38,6 +38,9 @@ main{padding:14px 16px calc(env(safe-area-inset-bottom,0px) + 28px);max-width:64
 .map{position:relative;background:var(--mapbg);border-bottom:1px solid var(--line)}
 .map svg{display:block;width:100%;height:auto}
 .map svg.ov{position:absolute;left:0;top:0;width:100%;height:100%}
+.map[data-id]{cursor:pointer}
+.zm{position:absolute;right:8px;top:8px;width:30px;height:30px;border-radius:9px;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;pointer-events:none}
+.zm svg{width:16px;height:16px}
 .pin{stroke:var(--bg)}
 /* ダークのとき、白地図は暗い色に、写真は少し暗くする。淡色は変えない（ここの数字で調整できる） */
 html[data-theme="dark"] .map svg.tiles{filter:invert(1) hue-rotate(180deg) brightness(.82) contrast(.92)}
@@ -53,6 +56,17 @@ h2{margin:0 0 6px;font-size:15px;font-weight:600;line-height:1.45;display:-webki
 .go{flex:1;text-align:center;background:var(--blue);color:var(--onblue);font-weight:700;text-decoration:none;padding:12px;border-radius:12px}
 .go:active{filter:brightness(.85)}
 .del{color:var(--muted);font-size:13px;text-decoration:none;border:1px solid var(--line);background:transparent;border-radius:10px;padding:10px 11px}
+.map.big{position:relative;flex:1;min-height:0;border-bottom:0;touch-action:none}
+.map.big svg{position:absolute;left:0;top:0;width:100%;height:100%}
+.viewer{position:fixed;inset:0;z-index:9;background:var(--bg);display:flex;flex-direction:column;overscroll-behavior:contain}
+.viewer[hidden]{display:none}
+.vbar{display:flex;align-items:center;gap:10px;padding:calc(env(safe-area-inset-top,0px) + 8px) 12px 8px;border-bottom:1px solid var(--line);background:var(--bg)}
+html[data-theme="light"] .vbar{background:linear-gradient(#0e141b,#0e141b) no-repeat top left / 100% env(safe-area-inset-top,0px),var(--bg)}
+.vt{flex:1;min-width:0;font-size:15px;font-weight:600;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.vinfo{padding:12px 16px calc(env(safe-area-inset-bottom,0px) + 14px);border-top:1px solid var(--line);background:var(--panel)}
+.vinfo .meta{margin:0 0 10px}
+.vinfo .go{display:block}
+html.lock,html.lock body{overflow:hidden}
 .empty{text-align:center;color:var(--muted);padding:48px 12px}
 .sheet{position:fixed;inset:0;z-index:10;background:rgba(0,0,0,.6);display:flex;align-items:flex-end}
 .sheet[hidden]{display:none}
@@ -76,6 +90,11 @@ h2{margin:0 0 6px;font-size:15px;font-weight:600;line-height:1.45;display:-webki
   <input id="q" type="search" placeholder="ルートを検索" autocomplete="off">
 </header>
 <main><p id="status"></p><div id="list"></div></main>
+<div class="viewer" id="viewer" hidden>
+  <div class="vbar"><button class="ic" id="vclose" aria-label="閉じる">✕</button><div class="vt" id="vtitle"></div></div>
+  <div class="map big" id="vmap"></div>
+  <div class="vinfo"><p class="meta" id="vmeta"></p><a class="go" id="vgo" rel="noopener">ナビを開始</a></div>
+</div>
 <div class="sheet" id="sheet" hidden><div class="panel">
   <h3>設定</h3>
   <span class="lb">表示</span>
@@ -87,7 +106,7 @@ h2{margin:0 0 6px;font-size:15px;font-weight:600;line-height:1.45;display:-webki
   <label for="tok">合言葉</label><input id="tok" type="password" autocomplete="off" autocapitalize="off">
   <div class="row"><button id="unhide">非表示を戻す</button></div>
   <div class="row"><button id="close">閉じる</button><button class="pri" id="save">保存して読み込む</button></div>
-  <p class="ver">画面のバージョン：2026-11-21a 道路線と距離</p>
+  <p class="ver">画面のバージョン：2026-11-21b 地図の拡大表示</p>
 </div></div>
 <script>
 const $=s=>document.querySelector(s);
@@ -134,8 +153,8 @@ $('#mapsel').onclick=e=>{
   mapType=b.dataset.v;LS.set('dr_map',mapType);applyMap();render();
 };
 const TU=256;
-const mx=(lng,z)=>(lng+180)/360*TU*Math.pow(2,z);
-const my=(lat,z)=>{const s=Math.sin(lat*Math.PI/180);return(0.5-Math.log((1+s)/(1-s))/(4*Math.PI))*TU*Math.pow(2,z)};
+const mx=(lng,z,u)=>(lng+180)/360*(u||TU)*Math.pow(2,z);
+const my=(lat,z,u)=>{const s=Math.sin(lat*Math.PI/180);return(0.5-Math.log((1+s)/(1-s))/(4*Math.PI))*(u||TU)*Math.pow(2,z)};
 
 /* 道路線（polyline・精度5）を [{lat,lng},...] に戻す。おかしいデータなら空にして、直線表示にする */
 function decodeLine(str){
@@ -158,8 +177,10 @@ function decodeLine(str){
   return out;
 }
 
-function thumb(p,road){
-  const W=320,H=160,pad=24,M=MAPS[mapType];
+/* o（省略可）: 全画面用の設定。W,H=描く枠の大きさ / pad=余白 / grow=地図を最大で何倍まで大きくするか */
+function thumb(p,road,o){
+  o=o||{};
+  const W=o.W||320,H=o.H||160,pad=o.pad||24,M=MAPS[mapType];
   const rd=(road&&road.line)?decodeLine(road.line):[];
   const hasRoad=rd.length>=2;
   const all=hasRoad?p.concat(rd):p;
@@ -169,19 +190,27 @@ function thumb(p,road){
     const xs=all.map(a=>mx(a.lng,t)),ys=all.map(a=>my(a.lat,t));
     if(Math.max(...xs)-Math.min(...xs)<=W-2*pad&&Math.max(...ys)-Math.min(...ys)<=H-2*pad){z=t;break}
   }
-  const xs=all.map(a=>mx(a.lng,z)),ys=all.map(a=>my(a.lat,z));
+  // 全画面のときだけ、枠に余りがあれば、タイルを少し拡大して枠いっぱいに使う（上限 o.grow 倍）
+  let tu=TU;
+  if(o.grow){
+    const bx=all.map(a=>mx(a.lng,z)),by=all.map(a=>my(a.lat,z));
+    const sx=Math.max(...bx)-Math.min(...bx),sy=Math.max(...by)-Math.min(...by);
+    const sc=Math.min((W-2*pad)/Math.max(sx,1),(H-2*pad)/Math.max(sy,1));
+    tu=TU*Math.min(Math.max(sc,1),o.grow);
+  }
+  const xs=all.map(a=>mx(a.lng,z,tu)),ys=all.map(a=>my(a.lat,z,tu));
   const cx=(Math.min(...xs)+Math.max(...xs))/2,cy=(Math.min(...ys)+Math.max(...ys))/2;
   const ox=cx-W/2,oy=cy-H/2;
-  const pt=p.map(a=>[mx(a.lng,z)-ox,my(a.lat,z)-oy]);
-  const lp=hasRoad?rd.map(a=>[mx(a.lng,z)-ox,my(a.lat,z)-oy]):pt;
+  const pt=p.map(a=>[mx(a.lng,z,tu)-ox,my(a.lat,z,tu)-oy]);
+  const lp=hasRoad?rd.map(a=>[mx(a.lng,z,tu)-ox,my(a.lat,z,tu)-oy]):pt;
   const n=Math.pow(2,z);
   // 1枚目の層：地図のタイル（画面に入ったときに読み込む。ここでは data-src に入れておく）
   let tiles='';
-  for(let ty=Math.floor(oy/TU);ty<=Math.floor((oy+H)/TU);ty++){
+  for(let ty=Math.floor(oy/tu);ty<=Math.floor((oy+H)/tu);ty++){
     if(ty<0||ty>=n)continue;
-    for(let tx=Math.floor(ox/TU);tx<=Math.floor((ox+W)/TU);tx++){
+    for(let tx=Math.floor(ox/tu);tx<=Math.floor((ox+W)/tu);tx++){
       if(tx<0||tx>=n)continue;
-      tiles+=`<image data-src="${BASE}${M.p}${z}/${tx}/${ty}.${M.e}" x="${(tx*TU-ox).toFixed(1)}" y="${(ty*TU-oy).toFixed(1)}" width="${TU+0.6}" height="${TU+0.6}"/>`;
+      tiles+=`<image data-src="${BASE}${M.p}${z}/${tx}/${ty}.${M.e}" x="${(tx*tu-ox).toFixed(1)}" y="${(ty*tu-oy).toFixed(1)}" width="${(tu+0.6).toFixed(1)}" height="${(tu+0.6).toFixed(1)}"/>`;
     }
   }
   // 2枚目の層：ルート線・ピン・出典（ダークでも色を変えない）
@@ -223,7 +252,8 @@ function render(){
   if(!vis.length){const d=document.createElement('div');d.className='empty';d.textContent=routes.length?'該当するルートがありません':'ルートがありません。右上の更新を押してください';list.append(d);return}
   vis.forEach(r=>{
     const c=document.createElement('article');c.className='card';
-    c.innerHTML=`<div class="map">${thumb(r.points,r.road)}</div><div class="body"><h2></h2><p class="meta"><span class="d"></span><span class="n"></span><span class="k"></span></p><div class="act"><a class="go" rel="noopener">ナビを開始</a><button class="del" data-id="">非表示</button></div></div>`;
+    c.dataset.id=r.id;
+    c.innerHTML=`<div class="map" data-id="1">${thumb(r.points,r.road)}<span class="zm" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg></span></div><div class="body"><h2></h2><p class="meta"><span class="d"></span><span class="n"></span><span class="k"></span></p><div class="act"><a class="go" rel="noopener">ナビを開始</a><button class="del" data-id="">非表示</button></div></div>`;
     c.querySelector('h2').textContent=r.title;
     c.querySelector('.d').textContent=r.date;
     c.querySelector('.n').textContent='経由 '+Math.max(r.points.length-2,0)+' か所';
@@ -258,9 +288,49 @@ $('#close').onclick=()=>{$('#sheet').hidden=true};
 $('#save').onclick=()=>{LS.set('dr_cfg',{url:$('#url').value,token:$('#tok').value});$('#sheet').hidden=true;load()};
 $('#unhide').onclick=()=>{hidden=[];LS.set('dr_hidden',hidden);render();$('#sheet').hidden=true};
 $('#q').oninput=e=>{query=e.target.value;render()};
+/* ===== 地図の全画面表示（第1段階：静止した大きい地図） =====
+   VIEW_GROW : 全画面のとき、地図を最大で何倍まで大きくするか（大きくするほど文字は大きく、少し粗くなる）。1にすると拡大なし。 */
+const VIEW_GROW=1.5;
+let viewId=null;
+function drawViewer(){
+  const r=routes.find(x=>String(x.id)===String(viewId));if(!r)return;
+  const m=$('#vmap'),b=m.getBoundingClientRect();
+  const W=360,H=Math.max(200,Math.round(W*b.height/Math.max(b.width,1)));
+  m.innerHTML=thumb(r.points,r.road,{W:W,H:H,pad:34,grow:VIEW_GROW});
+  loadTiles(m);
+}
+function openViewer(id){
+  const r=routes.find(x=>String(x.id)===String(id));if(!r)return;
+  viewId=id;
+  $('#vtitle').textContent=r.title;
+  const mt=$('#vmeta');mt.textContent='';
+  const add=t=>{const s=document.createElement('span');s.textContent=t;mt.append(s)};
+  add(r.date);
+  add('経由 '+Math.max(r.points.length-2,0)+' か所');
+  if(r.road&&typeof r.road.m==='number'&&r.road.m>0){const km=r.road.m/1000;add('約'+(km<10?km.toFixed(1):Math.round(km))+'km')}
+  $('#vgo').href=r.url;
+  $('#viewer').hidden=false;
+  document.documentElement.classList.add('lock');
+  drawViewer();
+}
+function closeViewer(){
+  viewId=null;
+  $('#viewer').hidden=true;
+  $('#vmap').textContent='';
+  document.documentElement.classList.remove('lock');
+}
+$('#vclose').onclick=closeViewer;
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&viewId!==null)closeViewer()});
+let rzT=null;
+window.addEventListener('resize',()=>{if(viewId===null)return;clearTimeout(rzT);rzT=setTimeout(drawViewer,200)});
 $('#list').onclick=e=>{
-  const b=e.target.closest('.del');if(!b)return;
-  if(confirm('この一覧から隠します。Gmailのメールは消えません。')){hidden.push(b.dataset.id);LS.set('dr_hidden',hidden);render()}
+  const b=e.target.closest('.del');
+  if(b){
+    if(confirm('この一覧から隠します。Gmailのメールは消えません。')){hidden.push(b.dataset.id);LS.set('dr_hidden',hidden);render()}
+    return;
+  }
+  const m=e.target.closest('.map');
+  if(m){const c=m.closest('.card');if(c&&c.dataset.id)openViewer(c.dataset.id)}
 };
 applyTheme();applyMap();render();load();
 </script>
