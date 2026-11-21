@@ -64,7 +64,9 @@ h2{margin:0 0 6px;font-size:15px;font-weight:600;line-height:1.45;display:-webki
 html[data-theme="light"] .vbar{background:linear-gradient(#0e141b,#0e141b) no-repeat top left / 100% env(safe-area-inset-top,0px),var(--bg)}
 .vt{flex:1;min-width:0;font-size:15px;font-weight:600;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .vinfo{padding:12px 16px calc(env(safe-area-inset-bottom,0px) + 14px);border-top:1px solid var(--line);background:var(--panel)}
-.vinfo .meta{margin:0 0 10px}
+.vinfo .meta{margin:0 0 4px}
+.vinfo .hint{margin:0 0 10px}
+.vz{position:absolute;left:0;top:0;width:100%;height:100%;transform-origin:0 0;-webkit-user-select:none;user-select:none}
 .vinfo .go{display:block}
 html.lock,html.lock body{overflow:hidden}
 .empty{text-align:center;color:var(--muted);padding:48px 12px}
@@ -93,7 +95,7 @@ html.lock,html.lock body{overflow:hidden}
 <div class="viewer" id="viewer" hidden>
   <div class="vbar"><button class="ic" id="vclose" aria-label="閉じる">✕</button><div class="vt" id="vtitle"></div></div>
   <div class="map big" id="vmap"></div>
-  <div class="vinfo"><p class="meta" id="vmeta"></p><a class="go" id="vgo" rel="noopener">ナビを開始</a></div>
+  <div class="vinfo"><p class="meta" id="vmeta"></p><p class="hint">ピンチで拡大・1本指で移動・ダブルタップで拡大／元に戻す</p><a class="go" id="vgo" rel="noopener">ナビを開始</a></div>
 </div>
 <div class="sheet" id="sheet" hidden><div class="panel">
   <h3>設定</h3>
@@ -106,7 +108,7 @@ html.lock,html.lock body{overflow:hidden}
   <label for="tok">合言葉</label><input id="tok" type="password" autocomplete="off" autocapitalize="off">
   <div class="row"><button id="unhide">非表示を戻す</button></div>
   <div class="row"><button id="close">閉じる</button><button class="pri" id="save">保存して読み込む</button></div>
-  <p class="ver">画面のバージョン：2026-11-21b 地図の拡大表示</p>
+  <p class="ver">画面のバージョン：2026-11-21c 地図のピンチ拡大・移動</p>
 </div></div>
 <script>
 const $=s=>document.querySelector(s);
@@ -291,12 +293,76 @@ $('#q').oninput=e=>{query=e.target.value;render()};
 /* ===== 地図の全画面表示（第1段階：静止した大きい地図） =====
    VIEW_GROW : 全画面のとき、地図を最大で何倍まで大きくするか（大きくするほど文字は大きく、少し粗くなる）。1にすると拡大なし。 */
 const VIEW_GROW=1.5;
+/* ===== 全画面地図の拡大・移動（第2段階 2-A：いまの地図の絵を拡大・移動する） =====
+   ZMAX : 最大の拡大倍率（大きくするほど細部は見えるが、地図の絵は粗くなる） */
+const ZMAX=5;
+let zs=1,ztx=0,zty=0,gest=null;
+const ptrs=new Map(),lastTap={t:0,x:0,y:0};
+function zApply(){
+  const z=$('#vz');if(!z)return;
+  const m=$('#vmap'),w=m.clientWidth,h=m.clientHeight;
+  zs=Math.min(Math.max(zs,1),ZMAX);
+  ztx=Math.min(0,Math.max(w-w*zs,ztx));
+  zty=Math.min(0,Math.max(h-h*zs,zty));
+  z.style.transform=zs===1?'':'translate('+ztx+'px,'+zty+'px) scale('+zs+')';
+}
+function zoomAt(px,py,ns){
+  ns=Math.min(Math.max(ns,1),ZMAX);
+  const cx=(px-ztx)/zs,cy=(py-zty)/zs;
+  zs=ns;ztx=px-cx*zs;zty=py-cy*zs;zApply();
+}
+(function(){
+  const vm=$('#vmap');
+  const rel=e=>{const b=vm.getBoundingClientRect();return{x:e.clientX-b.left,y:e.clientY-b.top}};
+  vm.addEventListener('pointerdown',e=>{
+    try{vm.setPointerCapture(e.pointerId)}catch(x){}
+    const p=rel(e);ptrs.set(e.pointerId,{x:p.x,y:p.y});
+    if(ptrs.size===1)gest={t:Date.now(),x0:p.x,y0:p.y,moved:false,multi:false};
+    else if(gest)gest.multi=true;
+    e.preventDefault();
+  });
+  vm.addEventListener('pointermove',e=>{
+    if(!ptrs.has(e.pointerId))return;
+    const p=rel(e),old=ptrs.get(e.pointerId);
+    if(ptrs.size===1){
+      if(gest&&Math.hypot(p.x-gest.x0,p.y-gest.y0)>10)gest.moved=true;
+      if(zs>1){ztx+=p.x-old.x;zty+=p.y-old.y;zApply()}
+    }else if(ptrs.size===2){
+      const ids=[...ptrs.keys()],o1=ptrs.get(ids[0]),o2=ptrs.get(ids[1]);
+      const n1=e.pointerId===ids[0]?p:o1,n2=e.pointerId===ids[1]?p:o2;
+      const d0=Math.hypot(o1.x-o2.x,o1.y-o2.y),d1=Math.hypot(n1.x-n2.x,n1.y-n2.y);
+      const m0={x:(o1.x+o2.x)/2,y:(o1.y+o2.y)/2},m1={x:(n1.x+n2.x)/2,y:(n1.y+n2.y)/2};
+      if(d0>0){
+        const ns=Math.min(Math.max(zs*d1/d0,1),ZMAX);
+        const cx=(m0.x-ztx)/zs,cy=(m0.y-zty)/zs;
+        zs=ns;ztx=m1.x-cx*zs;zty=m1.y-cy*zs;zApply();
+      }
+      if(gest)gest.moved=true;
+    }
+    ptrs.set(e.pointerId,{x:p.x,y:p.y});
+  });
+  const pend=e=>{
+    if(!ptrs.has(e.pointerId))return;
+    const p=ptrs.get(e.pointerId);ptrs.delete(e.pointerId);
+    const now=Date.now();
+    if(e.type==='pointerup'&&gest&&!gest.moved&&!gest.multi&&ptrs.size===0&&now-gest.t<350){
+      if(now-lastTap.t<350&&Math.hypot(p.x-lastTap.x,p.y-lastTap.y)<40){
+        lastTap.t=0;
+        if(zs>1.05){zs=1;ztx=0;zty=0;zApply()}else zoomAt(p.x,p.y,2.5);
+      }else{lastTap.t=now;lastTap.x=p.x;lastTap.y=p.y}
+    }
+    if(ptrs.size===0)gest=null;
+  };
+  vm.addEventListener('pointerup',pend);
+  vm.addEventListener('pointercancel',pend);
+})();
 let viewId=null;
 function drawViewer(){
   const r=routes.find(x=>String(x.id)===String(viewId));if(!r)return;
   const m=$('#vmap'),b=m.getBoundingClientRect();
   const W=360,H=Math.max(200,Math.round(W*b.height/Math.max(b.width,1)));
-  m.innerHTML=thumb(r.points,r.road,{W:W,H:H,pad:34,grow:VIEW_GROW});
+  m.innerHTML='<div class="vz" id="vz">'+thumb(r.points,r.road,{W:W,H:H,pad:34,grow:VIEW_GROW})+'</div>';
+  zs=1;ztx=0;zty=0;ptrs.clear();gest=null;lastTap.t=0;
   loadTiles(m);
 }
 function openViewer(id){
