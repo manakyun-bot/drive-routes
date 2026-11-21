@@ -58,6 +58,7 @@ h2{margin:0 0 6px;font-size:15px;font-weight:600;line-height:1.45;display:-webki
 .del{color:var(--muted);font-size:13px;text-decoration:none;border:1px solid var(--line);background:transparent;border-radius:10px;padding:10px 11px}
 .map.big{position:relative;flex:1;min-height:0;border-bottom:0;touch-action:none}
 .map.big svg{position:absolute;left:0;top:0;width:100%;height:100%}
+.viewer,.viewer *{touch-action:none}
 .viewer{position:fixed;inset:0;z-index:9;background:var(--bg);display:flex;flex-direction:column;overscroll-behavior:contain}
 .viewer[hidden]{display:none}
 .vbar{display:flex;align-items:center;gap:10px;padding:calc(env(safe-area-inset-top,0px) + 8px) 12px 8px;border-bottom:1px solid var(--line);background:var(--bg)}
@@ -95,7 +96,7 @@ html.lock,html.lock body{overflow:hidden}
 <div class="viewer" id="viewer" hidden>
   <div class="vbar"><button class="ic" id="vclose" aria-label="閉じる">✕</button><div class="vt" id="vtitle"></div></div>
   <div class="map big" id="vmap"></div>
-  <div class="vinfo"><p class="meta" id="vmeta"></p><p class="hint">ピンチで拡大・1本指で移動・ダブルタップで拡大／元に戻す</p><a class="go" id="vgo" rel="noopener">ナビを開始</a></div>
+  <div class="vinfo"><p class="meta" id="vmeta"></p><p class="hint">ピンチで拡大・縮小／拡大中は1本指で移動／ダブルタップで閉じる</p><a class="go" id="vgo" rel="noopener">ナビを開始</a></div>
 </div>
 <div class="sheet" id="sheet" hidden><div class="panel">
   <h3>設定</h3>
@@ -108,7 +109,7 @@ html.lock,html.lock body{overflow:hidden}
   <label for="tok">合言葉</label><input id="tok" type="password" autocomplete="off" autocapitalize="off">
   <div class="row"><button id="unhide">非表示を戻す</button></div>
   <div class="row"><button id="close">閉じる</button><button class="pri" id="save">保存して読み込む</button></div>
-  <p class="ver">画面のバージョン：2026-11-21c 地図のピンチ拡大・移動</p>
+  <p class="ver">画面のバージョン：2026-11-21e ダブルタップで全画面を閉じる</p>
 </div></div>
 <script>
 const $=s=>document.querySelector(s);
@@ -306,16 +307,12 @@ function zApply(){
   zty=Math.min(0,Math.max(h-h*zs,zty));
   z.style.transform=zs===1?'':'translate('+ztx+'px,'+zty+'px) scale('+zs+')';
 }
-function zoomAt(px,py,ns){
-  ns=Math.min(Math.max(ns,1),ZMAX);
-  const cx=(px-ztx)/zs,cy=(py-zty)/zs;
-  zs=ns;ztx=px-cx*zs;zty=py-cy*zs;zApply();
-}
 (function(){
   const vm=$('#vmap');
   const rel=e=>{const b=vm.getBoundingClientRect();return{x:e.clientX-b.left,y:e.clientY-b.top}};
   vm.addEventListener('pointerdown',e=>{
     try{vm.setPointerCapture(e.pointerId)}catch(x){}
+    if(e.isPrimary)ptrs.clear();   // 最初の指のときは、前の操作の残りを捨てる
     const p=rel(e);ptrs.set(e.pointerId,{x:p.x,y:p.y});
     if(ptrs.size===1)gest={t:Date.now(),x0:p.x,y0:p.y,moved:false,multi:false};
     else if(gest)gest.multi=true;
@@ -325,8 +322,8 @@ function zoomAt(px,py,ns){
     if(!ptrs.has(e.pointerId))return;
     const p=rel(e),old=ptrs.get(e.pointerId);
     if(ptrs.size===1){
-      if(gest&&Math.hypot(p.x-gest.x0,p.y-gest.y0)>10)gest.moved=true;
-      if(zs>1){ztx+=p.x-old.x;zty+=p.y-old.y;zApply()}
+      if(gest&&Math.hypot(p.x-gest.x0,p.y-gest.y0)>12)gest.moved=true;
+      if(zs>1&&gest&&gest.moved){ztx+=p.x-old.x;zty+=p.y-old.y;zApply()}
     }else if(ptrs.size===2){
       const ids=[...ptrs.keys()],o1=ptrs.get(ids[0]),o2=ptrs.get(ids[1]);
       const n1=e.pointerId===ids[0]?p:o1,n2=e.pointerId===ids[1]?p:o2;
@@ -344,22 +341,27 @@ function zoomAt(px,py,ns){
   const pend=e=>{
     if(!ptrs.has(e.pointerId))return;
     const p=ptrs.get(e.pointerId);ptrs.delete(e.pointerId);
-    const now=Date.now();
-    if(e.type==='pointerup'&&gest&&!gest.moved&&!gest.multi&&ptrs.size===0&&now-gest.t<350){
-      if(now-lastTap.t<350&&Math.hypot(p.x-lastTap.x,p.y-lastTap.y)<40){
-        lastTap.t=0;
-        if(zs>1.05){zs=1;ztx=0;zty=0;zApply()}else zoomAt(p.x,p.y,2.5);
-      }else{lastTap.t=now;lastTap.x=p.x;lastTap.y=p.y}
+    if(e.type==='pointerup'&&gest&&!gest.moved&&!gest.multi&&ptrs.size===0&&Date.now()-gest.t<600){
+      // 1回目のタッチ開始から2回目のタッチ開始までが 0.6 秒以内、場所が近ければダブルタップ
+      if(gest.t-lastTap.t<600&&Math.hypot(p.x-lastTap.x,p.y-lastTap.y)<60){
+        lastTap.t=0;ptrs.clear();gest=null;
+        closeViewer();
+        return;
+      }else{lastTap.t=gest.t;lastTap.x=p.x;lastTap.y=p.y}
     }
     if(ptrs.size===0)gest=null;
   };
   vm.addEventListener('pointerup',pend);
   vm.addEventListener('pointercancel',pend);
+  vm.addEventListener('lostpointercapture',pend);
+  vm.addEventListener('dblclick',e=>e.preventDefault());
+  document.addEventListener('gesturestart',e=>{if(viewId!==null)e.preventDefault()});
 })();
-let viewId=null;
+let viewId=null,drawSize={w:0,h:0},closedAt=0;
 function drawViewer(){
   const r=routes.find(x=>String(x.id)===String(viewId));if(!r)return;
   const m=$('#vmap'),b=m.getBoundingClientRect();
+  drawSize={w:Math.round(b.width),h:Math.round(b.height)};
   const W=360,H=Math.max(200,Math.round(W*b.height/Math.max(b.width,1)));
   m.innerHTML='<div class="vz" id="vz">'+thumb(r.points,r.road,{W:W,H:H,pad:34,grow:VIEW_GROW})+'</div>';
   zs=1;ztx=0;zty=0;ptrs.clear();gest=null;lastTap.t=0;
@@ -380,6 +382,7 @@ function openViewer(id){
   drawViewer();
 }
 function closeViewer(){
+  closedAt=Date.now();
   viewId=null;
   $('#viewer').hidden=true;
   $('#vmap').textContent='';
@@ -388,7 +391,14 @@ function closeViewer(){
 $('#vclose').onclick=closeViewer;
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&viewId!==null)closeViewer()});
 let rzT=null;
-window.addEventListener('resize',()=>{if(viewId===null)return;clearTimeout(rzT);rzT=setTimeout(drawViewer,200)});
+window.addEventListener('resize',()=>{
+  if(viewId===null)return;
+  clearTimeout(rzT);
+  rzT=setTimeout(()=>{
+    const m=$('#vmap');
+    if(Math.abs(m.clientWidth-drawSize.w)>40||Math.abs(m.clientHeight-drawSize.h)>40)drawViewer();
+  },200);
+});
 $('#list').onclick=e=>{
   const b=e.target.closest('.del');
   if(b){
@@ -396,7 +406,7 @@ $('#list').onclick=e=>{
     return;
   }
   const m=e.target.closest('.map');
-  if(m){const c=m.closest('.card');if(c&&c.dataset.id)openViewer(c.dataset.id)}
+  if(m&&Date.now()-closedAt>700){const c=m.closest('.card');if(c&&c.dataset.id)openViewer(c.dataset.id)}
 };
 applyTheme();applyMap();render();load();
 </script>
